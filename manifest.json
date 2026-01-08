@@ -1,0 +1,16 @@
+{
+  "manifest_version": 3,
+  "name": "Gemini Auto-Listen",
+  "version": "3.0",
+  "description": "Lecture vocale automatique des réponses Gemini",
+  "content_scripts": [
+    {
+      "matches": ["https://gemini.google.com/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "icons": {
+    "48": "icon.png"
+  }
+}
