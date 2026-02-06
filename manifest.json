@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Gemini Auto-Listen",
-  "version": "4.1",
+  "version": "4.2",
   "description": "Lecture vocale automatique des réponses Gemini",
   "permissions": ["storage"],
   "action": {

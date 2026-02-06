@@ -1,10 +1,11 @@
-// Gemini Auto-Listen v4.0 - Détection par comptage de boutons + diagnostics DOM
-// Approche : compter les boutons "Écouter". Quand un nouveau apparaît = nouvelle réponse = auto-play
-// Expose window.__autoListenStatus via data-attribute pour diagnostic externe (Chrome DevTools MCP)
+// Gemini Auto-Listen v4.2 - Comptage Écouter+Pause (anti-boucle structurel)
+// Approche : compter les boutons "Écouter" + "Pause" ensemble. Le total reste stable pendant la lecture.
+// Quand le total augmente = nouvelle réponse = auto-play. Plus besoin de cooldown.
+// Expose diagnostics via data-attribute pour Chrome DevTools MCP
 (function() {
     'use strict';
 
-    const VERSION = '4.1';
+    const VERSION = '4.2';
 
     // === DIAGNOSTICS ===
     // État exposé via le DOM pour être lu depuis la console / MCP DevTools
@@ -69,7 +70,7 @@
 
     const TIMING = {
         POLL_INTERVAL: 300,         // Vérifier toutes les 300ms
-        STABLE_DURATION: 1200,      // Bouton stable pendant 1.2s avant de cliquer
+        STABLE_DURATION: 800,       // Bouton stable pendant 800ms avant de cliquer
         POST_CLICK_WAIT: 600,       // Attendre après un clic pour vérifier
         RETRY_DELAY: 400,           // Délai avant retry
         MAX_RETRIES: 2,             // Max 2 tentatives de clic
@@ -83,8 +84,6 @@
     let isGenerating = false;
     let isProcessing = false;
     let currentUrl = location.href;
-    let lastClickSuccessAt = 0;          // Timestamp du dernier clic réussi
-    const COOLDOWN_MS = 30000;           // 30s de cooldown après un clic réussi
 
     // === CHROME STORAGE ===
     function loadState() {
@@ -110,6 +109,14 @@
     } catch (e) { /* ignore */ }
 
     // === BUTTON HELPERS ===
+    // Compte Écouter + Pause ensemble → total stable pendant la lecture audio
+    function getVisibleResponseButtons() {
+        const listenBtns = document.querySelectorAll(SELECTORS.listen);
+        const pauseBtns = document.querySelectorAll(SELECTORS.pause);
+        const all = [...listenBtns, ...pauseBtns];
+        return all.filter(btn => btn.offsetParent !== null);
+    }
+
     function getVisibleListenButtons() {
         const buttons = document.querySelectorAll(SELECTORS.listen);
         return Array.from(buttons).filter(btn => btn.offsetParent !== null);
@@ -218,19 +225,6 @@
             return;
         }
 
-        // Cooldown : ignorer les fluctuations de boutons après un clic réussi
-        const sinceLastClick = Date.now() - lastClickSuccessAt;
-        if (sinceLastClick < COOLDOWN_MS) {
-            log(`🧊 Cooldown actif (${Math.round(sinceLastClick/1000)}s/${COOLDOWN_MS/1000}s), ignoré`);
-            // Recaler la baseline pour ne pas re-trigger après le cooldown
-            const buttons = getVisibleListenButtons();
-            lastStableCount = buttons.length;
-            currentCount = lastStableCount;
-            countChangedAt = Date.now();
-            diag.listenButtonCount = lastStableCount;
-            return;
-        }
-
         isProcessing = true;
         diag.isProcessing = true;
         log('🆕 Nouvelle réponse détectée ! Recherche du bouton Écouter...');
@@ -247,28 +241,16 @@
             return;
         }
 
-        const success = await smartClick(btn);
-
-        if (success) {
-            lastClickSuccessAt = Date.now();
-            // Recaler la baseline après un clic réussi pour éviter les rebonds
-            await sleep(2000);
-            const freshButtons = getVisibleListenButtons();
-            lastStableCount = freshButtons.length;
-            currentCount = lastStableCount;
-            countChangedAt = Date.now();
-            diag.listenButtonCount = lastStableCount;
-            log(`🔄 Baseline recalée à ${lastStableCount} après clic réussi`);
-        }
+        await smartClick(btn);
 
         isProcessing = false;
         diag.isProcessing = false;
         updateDiag();
     }
 
-    // === DETECTION PRINCIPALE: Comptage de boutons ===
+    // === DETECTION PRINCIPALE: Comptage de boutons (Écouter + Pause) ===
     function pollState() {
-        const buttons = getVisibleListenButtons();
+        const buttons = getVisibleResponseButtons();
         const count = buttons.length;
         const generating = isStopButtonVisible();
 
@@ -343,8 +325,8 @@
         diag.initialized = true;
         loadState();
 
-        // Compter les boutons initiaux
-        const initialButtons = getVisibleListenButtons();
+        // Compter les boutons initiaux (Écouter + Pause)
+        const initialButtons = getVisibleResponseButtons();
         lastStableCount = initialButtons.length;
         currentCount = lastStableCount;
         countChangedAt = Date.now();
