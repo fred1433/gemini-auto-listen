@@ -1,8 +1,14 @@
 {
   "manifest_version": 3,
   "name": "Gemini Auto-Listen",
-  "version": "3.0",
+  "version": "4.1",
   "description": "Lecture vocale automatique des réponses Gemini",
+  "permissions": ["storage"],
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": "icon.png",
+    "default_title": "Gemini Auto-Listen"
+  },
   "content_scripts": [
     {
       "matches": ["https://gemini.google.com/*"],
