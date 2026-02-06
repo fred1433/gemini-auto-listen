@@ -1,11 +1,11 @@
-// Gemini Auto-Listen v4.2 - Comptage Écouter+Pause (anti-boucle structurel)
-// Approche : compter les boutons "Écouter" + "Pause" ensemble. Le total reste stable pendant la lecture.
-// Quand le total augmente = nouvelle réponse = auto-play. Plus besoin de cooldown.
+// Gemini Auto-Listen v4.3 - Fix smartClick + gel baseline
+// Comptage Écouter+Pause. Vérifie le bouton cliqué lui-même (pas le dernier de la liste).
+// Gel de baseline pendant le traitement pour éviter re-triggers.
 // Expose diagnostics via data-attribute pour Chrome DevTools MCP
 (function() {
     'use strict';
 
-    const VERSION = '4.2';
+    const VERSION = '4.3';
 
     // === DIAGNOSTICS ===
     // État exposé via le DOM pour être lu depuis la console / MCP DevTools
@@ -71,8 +71,8 @@
     const TIMING = {
         POLL_INTERVAL: 300,         // Vérifier toutes les 300ms
         STABLE_DURATION: 800,       // Bouton stable pendant 800ms avant de cliquer
-        POST_CLICK_WAIT: 600,       // Attendre après un clic pour vérifier
-        RETRY_DELAY: 400,           // Délai avant retry
+        POST_CLICK_WAIT: 1000,      // Attendre 1s après un clic pour vérifier (Gemini met du temps à afficher Pause)
+        RETRY_DELAY: 800,           // Délai avant retry
         MAX_RETRIES: 2,             // Max 2 tentatives de clic
         URL_CHECK_INTERVAL: 1000,   // Vérifier changement d'URL toutes les 1s
     };
@@ -83,6 +83,8 @@
     let countChangedAt = Date.now();
     let isGenerating = false;
     let isProcessing = false;
+    let processingEndedAt = 0;       // Timestamp fin de traitement (grace period)
+    const GRACE_PERIOD_MS = 5000;    // 5s de grâce après un clic pour stabiliser le comptage
     let currentUrl = location.href;
 
     // === CHROME STORAGE ===
@@ -155,19 +157,19 @@
         return new Promise(r => setTimeout(r, ms));
     }
 
-    async function smartClick(btn, attempt = 1) {
+    async function smartClick(btn) {
         const label = btn.getAttribute('aria-label');
-        log(`🎯 Tentative ${attempt}/${TIMING.MAX_RETRIES} - clic sur "${label}"`);
+        log(`🎯 Clic sur "${label}"`);
         diag.clickAttempts++;
         updateDiag();
 
         btn.scrollIntoView({ block: 'center', behavior: 'instant' });
         simulateClick(btn);
 
-        // Attendre et vérifier si ça a marché
+        // Attendre que Gemini ait le temps de réagir (transition Écouter → Pause)
         await sleep(TIMING.POST_CLICK_WAIT);
 
-        // Cas 1: Audio joue (bouton pause visible)
+        // Vérification 1: Audio joue (bouton pause visible)
         if (isAudioPlaying()) {
             log('✅ SUCCÈS: Audio en lecture (pause détecté)');
             diag.clickSuccesses++;
@@ -175,36 +177,52 @@
             return true;
         }
 
-        // Cas 2: Le bouton "Écouter" a disparu ou changé
-        const freshBtn = getLastVisibleListenButton();
-        if (!freshBtn) {
-            log('✅ SUCCÈS: Bouton Écouter disparu (probablement en lecture)');
+        // Vérification 2: Le bouton qu'on a cliqué a changé de label ou est devenu invisible
+        const currentLabel = btn.getAttribute('aria-label');
+        if (currentLabel !== label) {
+            log(`✅ SUCCÈS: Label du bouton cliqué changé "${label}" → "${currentLabel}"`);
+            diag.clickSuccesses++;
+            updateDiag();
+            return true;
+        }
+        if (btn.offsetParent === null) {
+            log('✅ SUCCÈS: Bouton cliqué devenu invisible (probablement en lecture)');
             diag.clickSuccesses++;
             updateDiag();
             return true;
         }
 
-        const freshLabel = freshBtn.getAttribute('aria-label');
-        if (freshLabel !== label) {
-            log(`✅ SUCCÈS: Label changé "${label}" → "${freshLabel}"`);
+        // Vérification 3: Attendre un peu plus (Gemini peut être lent)
+        log('⏳ Pas encore d\'effet visible, attente supplémentaire...');
+        await sleep(TIMING.RETRY_DELAY);
+
+        if (isAudioPlaying()) {
+            log('✅ SUCCÈS: Audio détecté après attente supplémentaire');
             diag.clickSuccesses++;
             updateDiag();
             return true;
         }
 
-        // Le clic n'a pas eu d'effet visible
-        if (attempt < TIMING.MAX_RETRIES) {
-            log(`⚠️ Clic ${attempt} sans effet visible, retry...`);
-            await sleep(TIMING.RETRY_DELAY);
-            // Re-chercher le bouton frais (le DOM peut avoir changé)
-            const retryBtn = getLastVisibleListenButton();
-            if (retryBtn) {
-                return smartClick(retryBtn, attempt + 1);
-            }
-            log('⚠️ Plus de bouton trouvé pour retry');
+        if (btn.getAttribute('aria-label') !== label || btn.offsetParent === null) {
+            log('✅ SUCCÈS: Bouton changé après attente supplémentaire');
+            diag.clickSuccesses++;
+            updateDiag();
+            return true;
         }
 
-        log(`❌ ÉCHEC après ${attempt} tentative(s)`);
+        // Dernier recours: re-cliquer le MÊME bouton (pas un autre)
+        log('⚠️ Re-clic sur le même bouton...');
+        simulateClick(btn);
+        await sleep(TIMING.POST_CLICK_WAIT);
+
+        if (isAudioPlaying() || btn.getAttribute('aria-label') !== label || btn.offsetParent === null) {
+            log('✅ SUCCÈS: Audio détecté après re-clic');
+            diag.clickSuccesses++;
+            updateDiag();
+            return true;
+        }
+
+        log('❌ ÉCHEC: Pas d\'audio détecté après 2 tentatives sur le même bouton');
         diag.clickFailures++;
         updateDiag();
         return false;
@@ -244,7 +262,17 @@
         await smartClick(btn);
 
         isProcessing = false;
+        processingEndedAt = Date.now();
         diag.isProcessing = false;
+
+        // Recaler la baseline après le traitement pour absorber les fluctuations
+        await sleep(2000);
+        const freshButtons = getVisibleResponseButtons();
+        lastStableCount = freshButtons.length;
+        currentCount = lastStableCount;
+        countChangedAt = Date.now();
+        diag.listenButtonCount = lastStableCount;
+        log(`🔄 Baseline recalée à ${lastStableCount} après traitement`);
         updateDiag();
     }
 
@@ -275,7 +303,8 @@
 
         // TRIGGER: le compte a augmenté, est stable, et pas en train de générer
         const stableFor = Date.now() - countChangedAt;
-        if (count > lastStableCount && stableFor >= TIMING.STABLE_DURATION && !generating && !isProcessing) {
+        const inGracePeriod = (Date.now() - processingEndedAt) < GRACE_PERIOD_MS;
+        if (count > lastStableCount && stableFor >= TIMING.STABLE_DURATION && !generating && !isProcessing && !inGracePeriod) {
             const increase = count - lastStableCount;
             log(`✨ +${increase} nouveau(x) bouton(s), stable depuis ${stableFor}ms, pas de génération`);
 
@@ -293,7 +322,8 @@
         }
 
         // Mettre à jour si le compte a diminué (navigation, suppression)
-        if (count < lastStableCount && stableFor >= TIMING.STABLE_DURATION) {
+        // MAIS PAS pendant le traitement d'un clic (gel de baseline)
+        if (count < lastStableCount && stableFor >= TIMING.STABLE_DURATION && !isProcessing && !inGracePeriod) {
             log(`📉 Boutons diminués: ${lastStableCount} → ${count} (reset baseline)`);
             lastStableCount = count;
             diag.listenButtonCount = count;
