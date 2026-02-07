@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Gemini Auto-Listen",
   "version": "4.3",
-  "description": "Lecture vocale automatique des réponses Gemini",
+  "description": "Automatically reads Gemini responses aloud — no more clicking Listen every time.",
   "permissions": ["storage"],
   "action": {
     "default_popup": "popup.html",

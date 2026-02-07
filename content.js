@@ -1,14 +1,15 @@
-// Gemini Auto-Listen v4.3 - Fix smartClick + gel baseline
-// Comptage Écouter+Pause. Vérifie le bouton cliqué lui-même (pas le dernier de la liste).
-// Gel de baseline pendant le traitement pour éviter re-triggers.
-// Expose diagnostics via data-attribute pour Chrome DevTools MCP
+// Gemini Auto-Listen v4.3
+// Auto-plays Gemini responses using the built-in "Listen" button.
+// Tracks Listen+Pause button count to detect new responses without loops.
+// Verifies the clicked button itself (not the last in the list) to prevent misfires.
+// Freezes baseline during click processing to avoid re-triggers.
 (function() {
     'use strict';
 
     const VERSION = '4.3';
 
     // === DIAGNOSTICS ===
-    // État exposé via le DOM pour être lu depuis la console / MCP DevTools
+    // Exposed via DOM data-attribute for debugging
     const diag = {
         version: VERSION,
         initialized: false,
@@ -46,19 +47,22 @@
 
     const SELECTORS = {
         listen: [
-            'button[aria-label="Écouter"]',
             'button[aria-label="Listen"]',
             'button[aria-label="Read aloud"]',
-            'button[aria-label="Escuchar"]',         // Espagnol
-            'button[aria-label="Ouvir"]',             // Portugais
+            'button[aria-label="\u00C9couter"]',        // French
+            'button[aria-label="Escuchar"]',             // Spanish
+            'button[aria-label="Ouvir"]',                // Portuguese
+            'button[aria-label="Anh\u00F6ren"]',        // German
+            'button[aria-label="Ascolta"]',              // Italian
+            'button[aria-label="\u8074\u304F"]',         // Japanese
         ].join(', '),
         stop: [
-            'button[aria-label="Interrompre la réponse"]',
-            'button[aria-label="Interrompre"]',
             'button[aria-label="Stop responding"]',
             'button[aria-label="Stop"]',
-            'button[aria-label="Arrêter la réponse"]',
-            'button[aria-label="Arrêter"]',
+            'button[aria-label="Interrompre la r\u00E9ponse"]',
+            'button[aria-label="Interrompre"]',
+            'button[aria-label="Arr\u00EAter la r\u00E9ponse"]',
+            'button[aria-label="Arr\u00EAter"]',
             '[data-testid="stop-button"]',
         ].join(', '),
         pause: [
@@ -69,12 +73,12 @@
     };
 
     const TIMING = {
-        POLL_INTERVAL: 300,         // Vérifier toutes les 300ms
-        STABLE_DURATION: 800,       // Bouton stable pendant 800ms avant de cliquer
-        POST_CLICK_WAIT: 1000,      // Attendre 1s après un clic pour vérifier (Gemini met du temps à afficher Pause)
-        RETRY_DELAY: 800,           // Délai avant retry
-        MAX_RETRIES: 2,             // Max 2 tentatives de clic
-        URL_CHECK_INTERVAL: 1000,   // Vérifier changement d'URL toutes les 1s
+        POLL_INTERVAL: 300,
+        STABLE_DURATION: 800,
+        POST_CLICK_WAIT: 1000,
+        RETRY_DELAY: 800,
+        MAX_RETRIES: 2,
+        URL_CHECK_INTERVAL: 1000,
     };
 
     // === STATE ===
@@ -83,8 +87,8 @@
     let countChangedAt = Date.now();
     let isGenerating = false;
     let isProcessing = false;
-    let processingEndedAt = 0;       // Timestamp fin de traitement (grace period)
-    const GRACE_PERIOD_MS = 5000;    // 5s de grâce après un clic pour stabiliser le comptage
+    let processingEndedAt = 0;
+    const GRACE_PERIOD_MS = 5000;
     let currentUrl = location.href;
 
     // === CHROME STORAGE ===
@@ -93,10 +97,10 @@
             chrome.storage.local.get(['autoListenEnabled'], (result) => {
                 isEnabled = result.autoListenEnabled !== false;
                 diag.enabled = isEnabled;
-                log(isEnabled ? '✅ Auto-lecture ACTIVÉE' : '❌ Auto-lecture DÉSACTIVÉE');
+                log(isEnabled ? 'Auto-listen ENABLED' : 'Auto-listen DISABLED');
             });
         } catch (e) {
-            log('⚠️ chrome.storage indisponible:', e.message);
+            log('chrome.storage unavailable:', e.message);
         }
     }
 
@@ -105,13 +109,13 @@
             if (namespace === 'local' && changes.autoListenEnabled) {
                 isEnabled = changes.autoListenEnabled.newValue !== false;
                 diag.enabled = isEnabled;
-                log(isEnabled ? '✅ Auto-lecture ACTIVÉE' : '❌ Auto-lecture DÉSACTIVÉE');
+                log(isEnabled ? 'Auto-listen ENABLED' : 'Auto-listen DISABLED');
             }
         });
     } catch (e) { /* ignore */ }
 
     // === BUTTON HELPERS ===
-    // Compte Écouter + Pause ensemble → total stable pendant la lecture audio
+    // Count Listen + Pause together — total stays stable during audio playback
     function getVisibleResponseButtons() {
         const listenBtns = document.querySelectorAll(SELECTORS.listen);
         const pauseBtns = document.querySelectorAll(SELECTORS.pause);
@@ -134,11 +138,9 @@
     }
 
     function isAudioPlaying() {
-        // Vérifier si un bouton pause est visible (= audio en cours)
         const pauseBtn = document.querySelector(SELECTORS.pause);
         if (pauseBtn && pauseBtn.offsetParent !== null) return true;
 
-        // Vérifier les éléments <audio> HTML5
         const audios = document.querySelectorAll('audio');
         for (const audio of audios) {
             if (!audio.paused) return true;
@@ -159,100 +161,94 @@
 
     async function smartClick(btn) {
         const label = btn.getAttribute('aria-label');
-        log(`🎯 Clic sur "${label}"`);
+        log(`Clicking "${label}"`);
         diag.clickAttempts++;
         updateDiag();
 
         btn.scrollIntoView({ block: 'center', behavior: 'instant' });
         simulateClick(btn);
 
-        // Attendre que Gemini ait le temps de réagir (transition Écouter → Pause)
         await sleep(TIMING.POST_CLICK_WAIT);
 
-        // Vérification 1: Audio joue (bouton pause visible)
         if (isAudioPlaying()) {
-            log('✅ SUCCÈS: Audio en lecture (pause détecté)');
+            log('SUCCESS: Audio playing (pause button detected)');
             diag.clickSuccesses++;
             updateDiag();
             return true;
         }
 
-        // Vérification 2: Le bouton qu'on a cliqué a changé de label ou est devenu invisible
         const currentLabel = btn.getAttribute('aria-label');
         if (currentLabel !== label) {
-            log(`✅ SUCCÈS: Label du bouton cliqué changé "${label}" → "${currentLabel}"`);
+            log(`SUCCESS: Clicked button label changed "${label}" -> "${currentLabel}"`);
             diag.clickSuccesses++;
             updateDiag();
             return true;
         }
         if (btn.offsetParent === null) {
-            log('✅ SUCCÈS: Bouton cliqué devenu invisible (probablement en lecture)');
+            log('SUCCESS: Clicked button became invisible (likely playing)');
             diag.clickSuccesses++;
             updateDiag();
             return true;
         }
 
-        // Vérification 3: Attendre un peu plus (Gemini peut être lent)
-        log('⏳ Pas encore d\'effet visible, attente supplémentaire...');
+        log('No visible effect yet, waiting longer...');
         await sleep(TIMING.RETRY_DELAY);
 
         if (isAudioPlaying()) {
-            log('✅ SUCCÈS: Audio détecté après attente supplémentaire');
+            log('SUCCESS: Audio detected after extra wait');
             diag.clickSuccesses++;
             updateDiag();
             return true;
         }
 
         if (btn.getAttribute('aria-label') !== label || btn.offsetParent === null) {
-            log('✅ SUCCÈS: Bouton changé après attente supplémentaire');
+            log('SUCCESS: Button changed after extra wait');
             diag.clickSuccesses++;
             updateDiag();
             return true;
         }
 
-        // Dernier recours: re-cliquer le MÊME bouton (pas un autre)
-        log('⚠️ Re-clic sur le même bouton...');
+        log('Re-clicking same button...');
         simulateClick(btn);
         await sleep(TIMING.POST_CLICK_WAIT);
 
         if (isAudioPlaying() || btn.getAttribute('aria-label') !== label || btn.offsetParent === null) {
-            log('✅ SUCCÈS: Audio détecté après re-clic');
+            log('SUCCESS: Audio detected after re-click');
             diag.clickSuccesses++;
             updateDiag();
             return true;
         }
 
-        log('❌ ÉCHEC: Pas d\'audio détecté après 2 tentatives sur le même bouton');
+        log('FAILED: No audio after 2 attempts on same button');
         diag.clickFailures++;
         updateDiag();
         return false;
     }
 
-    // === TRIGGER: Nouveau bouton détecté ===
+    // === TRIGGER: New response detected ===
     async function onNewResponse() {
         if (isProcessing) {
-            log('⏳ Déjà en traitement, ignoré');
+            log('Already processing, skipped');
             return;
         }
         if (!isEnabled) {
-            log('⏸️ Auto-lecture désactivée, ignoré');
+            log('Auto-listen disabled, skipped');
             return;
         }
         if (document.visibilityState !== 'visible') {
-            log('🙈 Onglet caché, ignoré');
+            log('Tab hidden, skipped');
             return;
         }
 
         isProcessing = true;
         diag.isProcessing = true;
-        log('🆕 Nouvelle réponse détectée ! Recherche du bouton Écouter...');
+        log('New response detected! Looking for Listen button...');
 
-        // Petit délai pour laisser le DOM se stabiliser
         await sleep(300);
 
         const btn = getLastVisibleListenButton();
         if (!btn) {
-            log('❌ Pas de bouton Écouter trouvé');
+            log('No Listen button found');
             isProcessing = false;
             diag.isProcessing = false;
             updateDiag();
@@ -265,66 +261,61 @@
         processingEndedAt = Date.now();
         diag.isProcessing = false;
 
-        // Recaler la baseline après le traitement pour absorber les fluctuations
+        // Recalibrate baseline after processing to absorb fluctuations
         await sleep(2000);
         const freshButtons = getVisibleResponseButtons();
         lastStableCount = freshButtons.length;
         currentCount = lastStableCount;
         countChangedAt = Date.now();
         diag.listenButtonCount = lastStableCount;
-        log(`🔄 Baseline recalée à ${lastStableCount} après traitement`);
+        log(`Baseline recalibrated to ${lastStableCount} after processing`);
         updateDiag();
     }
 
-    // === DETECTION PRINCIPALE: Comptage de boutons (Écouter + Pause) ===
+    // === MAIN DETECTION: Button count tracking (Listen + Pause) ===
     function pollState() {
         const buttons = getVisibleResponseButtons();
         const count = buttons.length;
         const generating = isStopButtonVisible();
 
-        // Log changement d'état de génération
         if (generating && !isGenerating) {
             isGenerating = true;
             diag.isGenerating = true;
-            log('🚀 Génération en cours (bouton Stop/Interrompre détecté)');
+            log('Generation in progress (Stop button detected)');
         }
         if (!generating && isGenerating) {
             isGenerating = false;
             diag.isGenerating = false;
-            log('⏹️ Génération terminée (bouton Stop disparu)');
+            log('Generation finished (Stop button gone)');
         }
 
-        // Suivre le changement de nombre de boutons
         if (count !== currentCount) {
-            log(`📊 Changement boutons: ${currentCount} → ${count}`);
+            log(`Button count: ${currentCount} -> ${count}`);
             currentCount = count;
             countChangedAt = Date.now();
         }
 
-        // TRIGGER: le compte a augmenté, est stable, et pas en train de générer
         const stableFor = Date.now() - countChangedAt;
         const inGracePeriod = (Date.now() - processingEndedAt) < GRACE_PERIOD_MS;
         if (count > lastStableCount && stableFor >= TIMING.STABLE_DURATION && !generating && !isProcessing && !inGracePeriod) {
             const increase = count - lastStableCount;
-            log(`✨ +${increase} nouveau(x) bouton(s), stable depuis ${stableFor}ms, pas de génération`);
+            log(`+${increase} new button(s), stable for ${stableFor}ms, not generating`);
 
-            // Seulement trigger si augmentation de 1 (nouvelle réponse unique)
-            // Si augmentation > 3, c'est probablement un changement de page
             if (increase <= 3) {
                 lastStableCount = count;
                 diag.listenButtonCount = count;
                 onNewResponse();
             } else {
-                log(`📋 Grande augmentation (${increase}), probablement changement de conversation - reset`);
+                log(`Large increase (${increase}), likely conversation switch - reset`);
                 lastStableCount = count;
                 diag.listenButtonCount = count;
             }
         }
 
-        // Mettre à jour si le compte a diminué (navigation, suppression)
-        // MAIS PAS pendant le traitement d'un clic (gel de baseline)
+        // Update baseline if count decreased (navigation, deletion)
+        // But NOT during click processing (baseline freeze)
         if (count < lastStableCount && stableFor >= TIMING.STABLE_DURATION && !isProcessing && !inGracePeriod) {
-            log(`📉 Boutons diminués: ${lastStableCount} → ${count} (reset baseline)`);
+            log(`Buttons decreased: ${lastStableCount} -> ${count} (baseline reset)`);
             lastStableCount = count;
             diag.listenButtonCount = count;
         }
@@ -332,12 +323,11 @@
         updateDiag();
     }
 
-    // === DÉTECTION CHANGEMENT D'URL (SPA) ===
+    // === SPA URL CHANGE DETECTION ===
     function checkUrlChange() {
         if (location.href !== currentUrl) {
-            log(`🔗 URL changée: ${currentUrl} → ${location.href}`);
+            log(`URL changed: ${currentUrl} -> ${location.href}`);
             currentUrl = location.href;
-            // Reset: on ne connaît pas encore le nombre de boutons de cette page
             lastStableCount = 0;
             currentCount = 0;
             countChangedAt = Date.now();
@@ -348,30 +338,25 @@
 
     // === INIT ===
     function init() {
-        log(`🎬 Auto-Listen v${VERSION} démarré`);
-        log(`📍 URL: ${location.href}`);
-        log(`👁️ Onglet visible: ${document.visibilityState === 'visible'}`);
+        log(`Auto-Listen v${VERSION} started`);
+        log(`URL: ${location.href}`);
+        log(`Tab visible: ${document.visibilityState === 'visible'}`);
 
         diag.initialized = true;
         loadState();
 
-        // Compter les boutons initiaux (Écouter + Pause)
         const initialButtons = getVisibleResponseButtons();
         lastStableCount = initialButtons.length;
         currentCount = lastStableCount;
         countChangedAt = Date.now();
         diag.listenButtonCount = lastStableCount;
 
-        log(`📊 Boutons initiaux: ${lastStableCount}`);
+        log(`Initial buttons: ${lastStableCount}`);
         updateDiag();
 
-        // Polling régulier
         setInterval(pollState, TIMING.POLL_INTERVAL);
-
-        // Vérification URL (SPA navigation)
         setInterval(checkUrlChange, TIMING.URL_CHECK_INTERVAL);
 
-        // MutationObserver pour détection plus rapide
         const observer = new MutationObserver(() => {
             pollState();
         });
@@ -380,7 +365,7 @@
             subtree: true,
         });
 
-        log('✅ Observateurs installés, en attente de nouvelles réponses...');
+        log('Observers installed, waiting for new responses...');
     }
 
     if (document.readyState === 'loading') {
