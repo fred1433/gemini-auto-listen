@@ -4,9 +4,9 @@ A Chrome extension that automatically reads Gemini responses aloud. No more clic
 
 ## Demo
 
-[![Watch the demo](thumbnail.png)](https://github.com/fred1433/gemini-auto-listen/blob/master/demo.mp4)
+https://github.com/user-attachments/assets/dbdfa1e9-1841-475e-aac8-adf36be3915c
 
-> Click to watch with sound — the response is read aloud automatically, no clicks needed.
+> Send a message, and the response is read aloud automatically — no clicks needed.
 
 ## Why?
 
