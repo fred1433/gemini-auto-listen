@@ -1,12 +1,13 @@
-// Gemini Auto-Listen v4.3
+// Gemini Auto-Listen v4.4
 // Auto-plays Gemini responses using the built-in "Listen" button.
 // Tracks Listen+Pause button count to detect new responses without loops.
 // Verifies the clicked button itself (not the last in the list) to prevent misfires.
 // Freezes baseline during click processing to avoid re-triggers.
+// Marks clicked buttons to prevent re-clicking paused responses.
 (function() {
     'use strict';
 
-    const VERSION = '4.3';
+    const VERSION = '4.4';
 
     // === DIAGNOSTICS ===
     // Exposed via DOM data-attribute for debugging
@@ -130,7 +131,9 @@
 
     function getLastVisibleListenButton() {
         const buttons = getVisibleListenButtons();
-        return buttons.length > 0 ? buttons[buttons.length - 1] : null;
+        // Filter out buttons that were already auto-clicked to avoid re-clicking old paused responses
+        const unprocessed = buttons.filter(btn => !btn.dataset.autoListenProcessed);
+        return unprocessed.length > 0 ? unprocessed[unprocessed.length - 1] : null;
     }
 
     function isStopButtonVisible() {
@@ -172,6 +175,7 @@
 
         if (isAudioPlaying()) {
             log('SUCCESS: Audio playing (pause button detected)');
+            btn.dataset.autoListenProcessed = 'true';
             diag.clickSuccesses++;
             updateDiag();
             return true;
@@ -180,12 +184,14 @@
         const currentLabel = btn.getAttribute('aria-label');
         if (currentLabel !== label) {
             log(`SUCCESS: Clicked button label changed "${label}" -> "${currentLabel}"`);
+            btn.dataset.autoListenProcessed = 'true';
             diag.clickSuccesses++;
             updateDiag();
             return true;
         }
         if (btn.offsetParent === null) {
             log('SUCCESS: Clicked button became invisible (likely playing)');
+            btn.dataset.autoListenProcessed = 'true';
             diag.clickSuccesses++;
             updateDiag();
             return true;
@@ -196,6 +202,7 @@
 
         if (isAudioPlaying()) {
             log('SUCCESS: Audio detected after extra wait');
+            btn.dataset.autoListenProcessed = 'true';
             diag.clickSuccesses++;
             updateDiag();
             return true;
@@ -203,6 +210,7 @@
 
         if (btn.getAttribute('aria-label') !== label || btn.offsetParent === null) {
             log('SUCCESS: Button changed after extra wait');
+            btn.dataset.autoListenProcessed = 'true';
             diag.clickSuccesses++;
             updateDiag();
             return true;
@@ -214,6 +222,7 @@
 
         if (isAudioPlaying() || btn.getAttribute('aria-label') !== label || btn.offsetParent === null) {
             log('SUCCESS: Audio detected after re-click');
+            btn.dataset.autoListenProcessed = 'true';
             diag.clickSuccesses++;
             updateDiag();
             return true;
