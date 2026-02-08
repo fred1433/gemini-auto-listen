@@ -1,1 +1,7 @@
 .DS_Store
+
+# Demo/screenshot files (already hosted elsewhere)
+demo.gif
+demo.mp4
+screenshot*.png
+thumbnail.png
