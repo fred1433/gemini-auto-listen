@@ -1,4 +1,4 @@
-// Gemini Auto-Listen v4.4
+// Gemini Auto-Listen v4.5
 // Auto-plays Gemini responses using the built-in "Listen" button.
 // Tracks Listen+Pause button count to detect new responses without loops.
 // Verifies the clicked button itself (not the last in the list) to prevent misfires.
@@ -7,7 +7,7 @@
 (function() {
     'use strict';
 
-    const VERSION = '4.4';
+    const VERSION = '4.5';
 
     // === DIAGNOSTICS ===
     // Exposed via DOM data-attribute for debugging
@@ -134,6 +134,14 @@
         // Filter out buttons that were already auto-clicked to avoid re-clicking old paused responses
         const unprocessed = buttons.filter(btn => !btn.dataset.autoListenProcessed);
         return unprocessed.length > 0 ? unprocessed[unprocessed.length - 1] : null;
+    }
+
+    // Mark all currently visible Listen buttons as processed so they are never auto-clicked.
+    // Called whenever the baseline is (re)set to prevent clicking old buttons that reappear.
+    function markAllButtonsProcessed() {
+        const buttons = getVisibleListenButtons();
+        buttons.forEach(btn => { btn.dataset.autoListenProcessed = 'true'; });
+        log(`Marked ${buttons.length} existing button(s) as processed`);
     }
 
     function isStopButtonVisible() {
@@ -318,6 +326,7 @@
                 log(`Large increase (${increase}), likely conversation switch - reset`);
                 lastStableCount = count;
                 diag.listenButtonCount = count;
+                markAllButtonsProcessed();
             }
         }
 
@@ -327,6 +336,8 @@
             log(`Buttons decreased: ${lastStableCount} -> ${count} (baseline reset)`);
             lastStableCount = count;
             diag.listenButtonCount = count;
+            // Re-mark all visible buttons so reappearing old buttons don't trigger clicks
+            markAllButtonsProcessed();
         }
 
         updateDiag();
@@ -342,6 +353,8 @@
             countChangedAt = Date.now();
             isGenerating = false;
             isProcessing = false;
+            // Mark any buttons already on the new page as processed
+            setTimeout(() => markAllButtonsProcessed(), 1500);
         }
     }
 
@@ -361,6 +374,7 @@
         diag.listenButtonCount = lastStableCount;
 
         log(`Initial buttons: ${lastStableCount}`);
+        markAllButtonsProcessed();
         updateDiag();
 
         setInterval(pollState, TIMING.POLL_INTERVAL);
