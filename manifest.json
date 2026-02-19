@@ -4,6 +4,10 @@
   "version": "4.6",
   "description": "Automatically reads Gemini responses aloud — no more clicking Listen every time.",
   "permissions": ["storage"],
+  "host_permissions": ["https://*.sentry.io/*"],
+  "background": {
+    "service_worker": "background.js"
+  },
   "action": {
     "default_popup": "popup.html",
     "default_icon": "icon.png",
@@ -12,7 +16,7 @@
   "content_scripts": [
     {
       "matches": ["https://gemini.google.com/*"],
-      "js": ["sentry.min.js", "content.js"],
+      "js": ["content.js"],
       "run_at": "document_idle"
     }
   ],

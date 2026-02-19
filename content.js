@@ -9,27 +9,34 @@
 
     const VERSION = '4.6';
 
-    // === SENTRY ERROR TRACKING ===
-    try {
-        if (typeof Sentry !== 'undefined') {
-            Sentry.init({
-                dsn: 'https://aa8cb8aa38bb40f2f5f64dccd2e9a350@o4508253840146432.ingest.us.sentry.io/4510914065661952',
-                release: 'gemini-auto-listen@' + VERSION,
-                environment: 'production',
-                sampleRate: 1.0,
-                beforeSend(event) {
-                    // Only send events originating from our extension
-                    const dominated = (event.exception?.values || []).some(v =>
-                        (v.stacktrace?.frames || []).some(f =>
-                            f.filename && f.filename.includes('gemini-auto-listen')
-                        )
-                    );
-                    return dominated ? event : null;
+    // === SENTRY ERROR TRACKING (via Service Worker) ===
+    const sentryBreadcrumbs = [];
+    function addBreadcrumb(msg) {
+        sentryBreadcrumbs.push({ timestamp: Date.now() / 1000, message: msg, category: 'auto-listen' });
+        if (sentryBreadcrumbs.length > 30) sentryBreadcrumbs.shift();
+    }
+    function reportError(err) {
+        try {
+            chrome.runtime.sendMessage({
+                type: 'sentry-error',
+                payload: {
+                    name: err.name || 'Error',
+                    message: err.message || String(err),
+                    stack: err.stack || '',
+                    breadcrumbs: sentryBreadcrumbs.slice(),
+                    extra: { url: location.href, userAgent: navigator.userAgent },
+                    platform: navigator.platform
+                }
+            }, () => {
+                if (chrome.runtime.lastError) {
+                    log('Sentry report failed: ' + chrome.runtime.lastError.message);
                 }
             });
-            Sentry.setTag('extension_version', VERSION);
-        }
-    } catch (e) { /* Sentry init failed silently */ }
+        } catch (e) { log('Sentry sendMessage exception: ' + e.message); }
+    }
+    // Global error handlers
+    addEventListener('error', (e) => { if (e.filename && e.filename.includes(chrome.runtime.id)) reportError(e.error || new Error(e.message)); });
+    addEventListener('unhandledrejection', (e) => { reportError(e.reason instanceof Error ? e.reason : new Error(String(e.reason))); });
 
     // === DIAGNOSTICS ===
     // Exposed via DOM data-attribute for debugging
@@ -63,8 +70,7 @@
         diag.lastEventTime = time;
         updateDiag();
         console.log('[Auto-Listen]', ...args);
-        // Add breadcrumb for Sentry
-        try { if (typeof Sentry !== 'undefined') Sentry.addBreadcrumb({ message: msg, level: 'info', category: 'auto-listen' }); } catch (e) {}
+        addBreadcrumb(msg);
     }
 
     // === CONFIG ===
