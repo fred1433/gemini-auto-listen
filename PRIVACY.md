@@ -1,21 +1,32 @@
 # Privacy Policy — Gemini Auto-Listen
 
-**Last updated:** February 8, 2026
+**Last updated:** February 19, 2026
 
 ## Overview
 
-Gemini Auto-Listen is a Chrome extension that automatically clicks the "Listen" button on Google Gemini responses. It operates entirely within your browser and does not collect, transmit, or store any personal data.
+Gemini Auto-Listen is a Chrome extension that automatically clicks the "Listen" button on Google Gemini responses. It operates entirely within your browser and does not collect personal data.
 
 ## Data Collection
 
-**This extension does not collect any data.** Specifically:
+This extension does not collect personal information, browsing history, website content, or set cookies.
 
-- No personal information is collected
-- No browsing history is tracked
-- No website content is read or stored
-- No data is sent to any external server
-- No analytics or tracking tools are used
-- No cookies are set
+## Error Tracking
+
+To improve reliability, the extension uses [Sentry](https://sentry.io) for anonymous crash reporting. When a JavaScript error occurs within the extension, the following data is sent:
+
+- **Error type and message** (e.g., "TypeError: Cannot read property...")
+- **Stack trace** (file names and line numbers within the extension code only)
+- **Browser name** (e.g., "Chrome")
+- **Extension version** (e.g., "4.6")
+- **Page URL** (anonymized — conversation IDs are stripped)
+
+**What is NOT collected:**
+- No conversation content or Gemini responses
+- No personal information or account data
+- No browsing history outside of error context
+- No IP addresses are stored by Sentry (configured to discard)
+
+Error reports are sent to Sentry's servers and are used solely for diagnosing and fixing bugs.
 
 ## Local Storage
 
@@ -29,10 +40,7 @@ The extension uses Chrome's `chrome.storage.sync` API solely to save your on/off
 
 - **`storage`**: Used to remember your on/off toggle state between sessions.
 - **Host access to `gemini.google.com`**: Required to inject the content script that detects and clicks the Listen button. The extension only runs on Gemini pages.
-
-## Third-Party Services
-
-This extension does not communicate with any third-party services, APIs, or servers. It has zero network activity.
+- **Host access to `*.sentry.io`**: Required for sending anonymous crash reports to the Sentry error tracking service.
 
 ## Open Source
 

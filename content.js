@@ -24,7 +24,7 @@
                     message: err.message || String(err),
                     stack: err.stack || '',
                     breadcrumbs: sentryBreadcrumbs.slice(),
-                    extra: { url: location.href, userAgent: navigator.userAgent },
+                    extra: { url: location.origin + location.pathname.replace(/\/app\/.*/, '/app/***'), userAgent: navigator.userAgent },
                     platform: navigator.platform
                 }
             }, () => {
@@ -36,7 +36,10 @@
     }
     // Global error handlers
     addEventListener('error', (e) => { if (e.filename && e.filename.includes(chrome.runtime.id)) reportError(e.error || new Error(e.message)); });
-    addEventListener('unhandledrejection', (e) => { reportError(e.reason instanceof Error ? e.reason : new Error(String(e.reason))); });
+    addEventListener('unhandledrejection', (e) => {
+        const err = e.reason instanceof Error ? e.reason : new Error(String(e.reason));
+        if (err.stack && err.stack.includes(chrome.runtime.id)) reportError(err);
+    });
 
     // === DIAGNOSTICS ===
     // Exposed via DOM data-attribute for debugging
