@@ -1,4 +1,4 @@
-// Gemini Auto-Listen v4.5
+// Gemini Auto-Listen v4.6
 // Auto-plays Gemini responses using the built-in "Listen" button.
 // Tracks Listen+Pause button count to detect new responses without loops.
 // Verifies the clicked button itself (not the last in the list) to prevent misfires.
@@ -7,7 +7,29 @@
 (function() {
     'use strict';
 
-    const VERSION = '4.5';
+    const VERSION = '4.6';
+
+    // === SENTRY ERROR TRACKING ===
+    try {
+        if (typeof Sentry !== 'undefined') {
+            Sentry.init({
+                dsn: 'https://aa8cb8aa38bb40f2f5f64dccd2e9a350@o4508253840146432.ingest.us.sentry.io/4510914065661952',
+                release: 'gemini-auto-listen@' + VERSION,
+                environment: 'production',
+                sampleRate: 1.0,
+                beforeSend(event) {
+                    // Only send events originating from our extension
+                    const dominated = (event.exception?.values || []).some(v =>
+                        (v.stacktrace?.frames || []).some(f =>
+                            f.filename && f.filename.includes('gemini-auto-listen')
+                        )
+                    );
+                    return dominated ? event : null;
+                }
+            });
+            Sentry.setTag('extension_version', VERSION);
+        }
+    } catch (e) { /* Sentry init failed silently */ }
 
     // === DIAGNOSTICS ===
     // Exposed via DOM data-attribute for debugging
@@ -41,6 +63,8 @@
         diag.lastEventTime = time;
         updateDiag();
         console.log('[Auto-Listen]', ...args);
+        // Add breadcrumb for Sentry
+        try { if (typeof Sentry !== 'undefined') Sentry.addBreadcrumb({ message: msg, level: 'info', category: 'auto-listen' }); } catch (e) {}
     }
 
     // === CONFIG ===
